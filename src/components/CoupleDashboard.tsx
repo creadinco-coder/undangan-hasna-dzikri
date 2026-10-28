@@ -120,6 +120,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   // 5. UI Feedback State
   const [copiedLinkGuestId, setCopiedLinkGuestId] = useState<string | null>(null);
   const [saveSuccessNotice, setSaveSuccessNotice] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   // 6. Live RSVP submissions from storage
   const [rsvps, setRsvps] = useState<RsvpSubmission[]>(() => {
@@ -141,7 +142,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
 
     // Fetch cloud guests
     fetchGuestsFromSupabase().then((data) => {
-      if (isMounted && data && data.length > 0) {
+      if (isMounted && data) {
         setGuests(data);
         try {
           localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(data));
@@ -151,7 +152,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
 
     // Fetch cloud RSVPs
     fetchRsvpFromSupabase().then((data) => {
-      if (isMounted && data && data.length > 0) {
+      if (isMounted && data) {
         setRsvps(data);
         try {
           localStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(data));
@@ -225,6 +226,31 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   const triggerNotice = (msg: string) => {
     setSaveSuccessNotice(msg);
     setTimeout(() => setSaveSuccessNotice(null), 3200);
+  };
+
+  // Manual re-sync with Supabase
+  const handleManualSync = async () => {
+    if (!isSupabaseConfigured()) return;
+    setIsSyncing(true);
+    try {
+      const [cloudGuests, cloudRsvps] = await Promise.all([
+        fetchGuestsFromSupabase(),
+        fetchRsvpFromSupabase(),
+      ]);
+      if (cloudGuests) {
+        setGuests(cloudGuests);
+        localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(cloudGuests));
+      }
+      if (cloudRsvps) {
+        setRsvps(cloudRsvps);
+        localStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(cloudRsvps));
+      }
+      triggerNotice('Data berhasil disinkronkan langsung dari Supabase Cloud!');
+    } catch {
+      triggerNotice('Gagal menyinkronkan data dari Supabase.');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // Download sample CSV template
@@ -522,14 +548,16 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
 
             {/* Supabase Cloud Sync Status Badge */}
             {isSupabaseConfigured() ? (
-              <div
-                title="Tersinkronisasi otomatis dengan Cloud Database Supabase"
-                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-600/40 text-[11px] text-emerald-300 font-medium shadow-xs"
+              <button
+                type="button"
+                onClick={handleManualSync}
+                title="Tersambung ke Supabase. Klik untuk refresh/sinkronkan data langsung dari cloud."
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-600/40 text-[11px] text-emerald-300 font-medium shadow-xs cursor-pointer transition-all"
               >
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <Database className="w-3 h-3 text-emerald-400" />
+                <RefreshCw className={`w-3 h-3 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
                 <span>Supabase Sync</span>
-              </div>
+              </button>
             ) : (
               <div
                 title="Berjalan dalam mode LocalStorage. Tambahkan VITE_SUPABASE_URL di env untuk cloud sync."

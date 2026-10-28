@@ -25,8 +25,9 @@ export function DashboardAuthGate({ onBackToInvitation }: DashboardAuthGateProps
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Read environment variable password with secure fallback
-  const validPassword = import.meta.env.VITE_DASHBOARD_PASSWORD || 'hasnadzikri2026';
+  // Read environment variable password with robust fallback & sanitization (strips accidental quotes from Vercel)
+  const rawEnvPassword = (import.meta.env.VITE_DASHBOARD_PASSWORD as string | undefined)?.replace(/^["']|["']$/g, '').trim();
+  const validPassword = rawEnvPassword || 'hasnadzikri2026';
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();

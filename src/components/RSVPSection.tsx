@@ -86,7 +86,7 @@ export function RSVPSection({ guestName = '' }: RSVPSectionProps) {
 
     let isMounted = true;
     fetchRsvpFromSupabase().then((data) => {
-      if (isMounted && data && data.length > 0) {
+      if (isMounted && data) {
         setSubmissions(data);
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(data));

@@ -46,17 +46,24 @@ const fadeInUpSectionVariants: Variants = {
 // 'unlocked': Full invitation unveiled
 type InvitationFlowState = 'cover' | 'interactive' | 'unlocked';
 
-// Helper to determine if current path is couple dashboard
+// Helper to determine if current path, search param, or hash is couple dashboard
 const checkIsDashboardRoute = (): boolean => {
   if (typeof window === 'undefined') return false;
   const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
   const search = window.location.search.toLowerCase();
+  const hash = window.location.hash.toLowerCase();
   return (
     path === '/dashboard' ||
     path === '/admin' ||
     path === '/pasangan' ||
+    path.endsWith('/dashboard') ||
+    path.endsWith('/admin') ||
+    search.includes('dashboard') ||
+    search.includes('admin') ||
     search.includes('page=dashboard') ||
-    search.includes('view=dashboard')
+    search.includes('view=dashboard') ||
+    hash.includes('dashboard') ||
+    hash.includes('admin')
   );
 };
 
@@ -97,7 +104,11 @@ export default function App() {
 
     // Listen to popstate or url changes
     window.addEventListener('popstate', handleLocationChange);
-    return () => window.removeEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
   }, []);
 
   // Track scroll progress across invitation sections
