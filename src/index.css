@@ -1,0 +1,391 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ivory: var(--color-bg-base, #F9F6EE);
+  --color-wedding-ivory: var(--color-bg-base, #F9F6EE);
+  --color-primary: var(--color-primary, #7395C0);
+  --color-primary-dark: var(--color-primary-dark, #5879a3);
+  --color-primary-light: var(--color-primary-light, #8bb0dc);
+  --color-secondary: var(--color-secondary, #AFC9E5);
+  --color-secondary-light: var(--color-secondary-light, #d6e4f3);
+  --color-accent: var(--color-accent, #F8DDA6);
+  --color-accent-dark: var(--color-accent-dark, #e8c67d);
+  --color-neutral: var(--color-neutral, #DADDE0);
+  --color-neutral-dark: var(--color-neutral-dark, #a9afb5);
+  --color-typography: var(--color-typography, #202A45);
+  --color-navy: var(--color-typography, #202A45);
+  --color-navy-dark: var(--color-navy-dark, #161D30);
+
+  /* Action color tokens */
+  --color-action-primary: var(--color-action-primary, #7395C0);
+  --color-action-primary-hover: var(--color-action-primary-hover, #5879a3);
+  --color-action-primary-text: var(--color-action-primary-text, #161D30);
+  --color-action-secondary: var(--color-action-secondary, #202A45);
+  --color-action-secondary-text: var(--color-action-secondary-text, #F9F6EE);
+  --color-action-secondary-border: var(--color-action-secondary-border, #7395C0);
+  --color-action-icon: var(--color-action-icon, #7395C0);
+}
+
+@layer base {
+  :root {
+    --font-serif: 'Cormorant Garamond', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --color-bg-base: #F9F6EE;
+    --color-ivory: #F9F6EE;
+    --color-primary: #7395C0;
+    --color-primary-dark: #5879a3;
+    --color-primary-light: #8bb0dc;
+    --color-secondary: #AFC9E5;
+    --color-secondary-light: #d6e4f3;
+    --color-accent: #F8DDA6;
+    --color-accent-dark: #e8c67d;
+    --color-neutral: #DADDE0;
+    --color-neutral-dark: #a9afb5;
+    --color-typography: #202A45;
+    --color-navy: #202A45;
+    --color-navy-dark: #161D30;
+    --color-dark-card: #202A45;
+
+    --color-action-primary: #7395C0;
+    --color-action-primary-hover: #5879a3;
+    --color-action-primary-text: #161D30;
+    --color-action-secondary: #202A45;
+    --color-action-secondary-text: #F9F6EE;
+    --color-action-secondary-border: #7395C0;
+    --color-action-icon: #7395C0;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: var(--color-typography);
+    background-color: var(--color-bg-base);
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    touch-action: manipulation;
+    overflow-x: hidden;
+  }
+}
+
+.font-serif {
+  font-family: var(--font-serif);
+}
+
+.font-sans {
+  font-family: var(--font-sans);
+}
+
+.font-arabic {
+  font-family: 'Amiri', 'Noto Naskh Arabic', serif;
+}
+
+/* Modern Editorial Typographic Scale Utilities */
+.text-display-editorial {
+  font-family: var(--font-serif);
+  font-size: clamp(1.6rem, 4.5vw, 2.1rem);
+  line-height: 1.22;
+  letter-spacing: 0.02em;
+  font-weight: 300;
+}
+
+.text-title-editorial {
+  font-family: var(--font-serif);
+  font-size: clamp(1.3rem, 3.8vw, 1.65rem);
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  font-weight: 400;
+}
+
+.text-eyebrow-editorial {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.text-body-editorial {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  font-weight: 300;
+}
+
+/* Safe area support for iOS notched devices */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 1rem);
+}
+
+/* Custom subtle noise / parchment texture overlay in ivory & pastel blue */
+.bg-wedding-pattern {
+  background-color: #F9F6EE;
+  background-image: radial-gradient(#AFC9E5 0.75px, transparent 0.75px), radial-gradient(#AFC9E5 0.75px, #F9F6EE 0.75px);
+  background-size: 30px 30px;
+  background-position: 0 0, 15px 15px;
+}
+
+/* Hide scrollbar for smooth clean appearance */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Subtle fade-in-up keyframe & transition support */
+@keyframes fadeInUpKeyframe {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* Floating Stardust / Golden Embers */
+@keyframes floatParticle {
+  0% {
+    transform: translateY(0) translateX(0) scale(0.7);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.9;
+  }
+  80% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-110px) translateX(16px) scale(1.15);
+    opacity: 0;
+  }
+}
+
+/* Shimmer Light Sweep for CTA Button and Highlights */
+@keyframes shimmerSweep {
+  0% {
+    transform: translateX(-150%) skewX(-20deg);
+  }
+  25%, 100% {
+    transform: translateX(250%) skewX(-20deg);
+  }
+}
+
+.animate-shimmer-sweep {
+  animation: shimmerSweep 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Gentle Radar Pulse Glow for CTA Action Button */
+@keyframes pulseRing {
+  0% {
+    transform: scale(0.98);
+    box-shadow: 0 0 0 0 rgba(248, 221, 166, 0.6), 0 0 0 0 rgba(115, 149, 192, 0.5);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 10px rgba(248, 221, 166, 0), 0 0 0 18px rgba(115, 149, 192, 0);
+  }
+  100% {
+    transform: scale(0.98);
+    box-shadow: 0 0 0 0 rgba(248, 221, 166, 0), 0 0 0 0 rgba(115, 149, 192, 0);
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulseRing 2.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Ambient Slow Breathing / Ken Burns Effect for Cover Backdrop */
+@keyframes kenBurnsSlow {
+  0% {
+    transform: scale(1.02) translate3d(0, 0, 0);
+  }
+  50% {
+    transform: scale(1.07) translate3d(-0.6%, -0.8%, 0);
+  }
+  100% {
+    transform: scale(1.02) translate3d(0, 0, 0);
+  }
+}
+
+.animate-ken-burns {
+  animation: kenBurnsSlow 24s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+/* Ambient Drifting Glow Orbs for Animated Backgrounds */
+@keyframes ambientDrift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: translate3d(20px, -24px, 0) scale(1.15);
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.3;
+  }
+}
+
+@keyframes ambientDriftReverse {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.25;
+  }
+  50% {
+    transform: translate3d(-24px, 18px, 0) scale(1.12);
+    opacity: 0.5;
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.25;
+  }
+}
+
+.animate-ambient-drift {
+  animation: ambientDrift 16s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-ambient-drift-reverse {
+  animation: ambientDriftReverse 20s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Golden Twinkle & Soft Aura */
+@keyframes goldTwinkle {
+  0%, 100% {
+    opacity: 0.6;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+    filter: drop-shadow(0 0 5px rgba(248, 221, 166, 0.9));
+  }
+}
+
+.animate-twinkle {
+  animation: goldTwinkle 2.8s ease-in-out infinite;
+}
+
+/* Envelope Micro-Float Icon */
+@keyframes envelopeFloat {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-2px) rotate(-5deg);
+  }
+  75% {
+    transform: translateY(-1px) rotate(5deg);
+  }
+}
+
+.animate-envelope-float {
+  animation: envelopeFloat 2.6s ease-in-out infinite;
+}
+
+/* Seamless Marquee Slider Keyframes */
+@keyframes marquee-scroll-left {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes marquee-scroll-right {
+  0% {
+    transform: translate3d(-50%, 0, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.animate-marquee-left {
+  display: flex;
+  width: max-content;
+  animation: marquee-scroll-left var(--marquee-speed, 32s) linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee-right {
+  display: flex;
+  width: max-content;
+  animation: marquee-scroll-right var(--marquee-speed, 36s) linear infinite;
+  will-change: transform;
+}
+
+/* Pause marquee on hover, touch, or active paused state */
+.marquee-container:hover .animate-marquee-left,
+.marquee-container:hover .animate-marquee-right,
+.marquee-container:focus-within .animate-marquee-left,
+.marquee-container:focus-within .animate-marquee-right,
+.marquee-paused .animate-marquee-left,
+.marquee-paused .animate-marquee-right {
+  animation-play-state: paused;
+}
+
+/* Elegant edge gradient mask for seamless entry and exit */
+.marquee-mask {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 6%,
+    black 94%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 6%,
+    black 94%,
+    transparent 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee-left,
+  .animate-marquee-right {
+    animation-play-state: paused !important;
+  }
+}
+
+/* Style Grafir / Luxury Engraved Text & Plaque Effects */
+.text-grafir-gold {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F8DDA6 28%, #e8c67d 55%, #b59247 80%, #685021 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.45))
+          drop-shadow(0 -1px 1.5px rgba(32, 42, 69, 0.95))
+          drop-shadow(0 4px 14px rgba(32, 42, 69, 0.8));
+}
+
+.text-grafir-sub {
+  color: #F8DDA6;
+  text-shadow: 
+    0 1px 1px rgba(255, 255, 255, 0.35),
+    0 -1px 2px rgba(32, 42, 69, 0.95),
+    0 2px 8px rgba(32, 42, 69, 0.85);
+}
+
+.border-grafir-plaque {
+  border: 1.5px solid rgba(248, 221, 166, 0.75);
+  box-shadow: 
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.35),
+    inset 0 -1px 2px rgba(32, 42, 69, 0.85),
+    0 8px 24px rgba(32, 42, 69, 0.4);
+}
+

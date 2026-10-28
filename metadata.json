@@ -1,0 +1,7 @@
+{
+  "name": "Undangan Pernikahan Digital",
+  "description": "Website undangan digital interaktif dan mobile-first dengan personalisasi nama tamu, floating navigation, galeri, dan timeline acara.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
