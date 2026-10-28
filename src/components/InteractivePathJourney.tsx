@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Heart,
   Calendar,
@@ -259,16 +260,16 @@ export function InteractivePathJourney({
         }
       });
 
-      // Check Finish: Directly unlock and open the complete invitation!
+      // Check Finish: Trigger celebratory fanfare and ceremonial arrival overlay
       if (dist >= totalLength - 4 && !hasTriggeredCompleteRef.current) {
         hasTriggeredCompleteRef.current = true;
         setIsCompleted(true);
         playCelebrationFanfare();
 
-        // Brief delay (~450ms) so user perceives the finish celebration, then immediately opens full invitation
+        // 1.5s celebratory duration so user enjoys the grand accomplishment & VIP welcome
         setTimeout(() => {
           onComplete();
-        }, 450);
+        }, 1500);
       }
     },
     [WAYPOINTS, vertexDistances, totalLength, onComplete]
@@ -562,11 +563,29 @@ export function InteractivePathJourney({
 
             {/* Finish Node Indicator at (315, 575) */}
             <g transform="translate(315, 575)">
+              {isCompleted && (
+                <>
+                  <circle
+                    r="24"
+                    fill="none"
+                    stroke="#F8DDA6"
+                    strokeWidth="1.5"
+                    className="animate-ping opacity-60"
+                  />
+                  <circle
+                    r="36"
+                    fill="none"
+                    stroke="#F8DDA6"
+                    strokeWidth="1"
+                    className="animate-pulse opacity-40"
+                  />
+                </>
+              )}
               <circle
-                r="13"
+                r="14"
                 fill={isCompleted ? '#F8DDA6' : '#202A45'}
                 stroke="#F8DDA6"
-                strokeWidth="2"
+                strokeWidth="2.5"
                 className={isCompleted ? 'animate-pulse' : ''}
               />
               <circle r="5" fill={isCompleted ? '#161D30' : '#7395C0'} />
@@ -787,6 +806,100 @@ export function InteractivePathJourney({
           </div>
         </div>
       </div>
+
+      {/* Grand Ceremonial Welcome Overlay upon Reaching Finish */}
+      <AnimatePresence>
+        {isCompleted && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#141A2B]/85 backdrop-blur-md pointer-events-auto select-none"
+          >
+            {/* Background Ambient Radial Gold Flare */}
+            <div className="absolute inset-0 bg-radial from-[#F8DDA6]/15 via-transparent to-transparent pointer-events-none" />
+
+            {/* Elegant Royal Invitation Envelope / Plaque */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.85, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: -12 }}
+              transition={{ delay: 0.08, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+              className="relative max-w-xs sm:max-w-sm w-full text-center px-6 py-7 rounded-3xl bg-gradient-to-b from-[#202C48]/95 to-[#161D30]/95 border border-[#F8DDA6]/60 shadow-2xl overflow-hidden"
+            >
+              {/* Top Golden Light Sheen */}
+              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-[#F8DDA6] to-transparent" />
+              <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-48 h-48 rounded-full bg-[#F8DDA6]/20 blur-2xl pointer-events-none" />
+
+              {/* Royal Botanical Crest Emblem */}
+              <div className="flex justify-center mb-3">
+                <motion.div
+                  initial={{ scale: 0, rotate: -25 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: 'spring', damping: 14, stiffness: 120 }}
+                  className="relative"
+                >
+                  <FloralCrest className="w-16 h-16 text-[#F8DDA6] drop-shadow-[0_0_18px_rgba(248,221,166,0.65)]" />
+                </motion.div>
+              </div>
+
+              {/* Status Badge */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.18 }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-[#F8DDA6]/20 border border-[#F8DDA6]/40 text-[#F8DDA6] text-[10px] font-semibold tracking-[0.2em] uppercase mb-3 shadow-xs"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-[#F8DDA6]" />
+                <span>Pintu Gerbang Terbuka</span>
+              </motion.div>
+
+              {/* Welcome Headline */}
+              <motion.h3
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.26 }}
+                className="font-serif text-xl sm:text-2xl text-[#F9F6EE] font-light tracking-wide mb-1"
+              >
+                Selamat Datang
+              </motion.h3>
+
+              {/* Guest Recipient Name */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.32 }}
+                className="font-serif italic text-lg sm:text-xl text-[#F8DDA6] font-normal mb-2.5 truncate px-2"
+              >
+                {guestName || 'Bapak/Ibu/Saudara/i'}
+              </motion.div>
+
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.38 }}
+                className="text-[11px] text-[#DADDE0]/85 font-light leading-relaxed mb-5 max-w-[260px] mx-auto"
+              >
+                Perjalanan telah sampai. Membuka lembaran penuh berkah pernikahan kami...
+              </motion.p>
+
+              {/* Animated Progress Unlocking Line */}
+              <div className="w-full bg-[#141A2B] h-1.5 rounded-full overflow-hidden border border-[#7395C0]/30 relative mb-1.5">
+                <motion.div
+                  initial={{ width: '0%' }}
+                  animate={{ width: '100%' }}
+                  transition={{ duration: 1.4, ease: 'easeInOut' }}
+                  className="h-full bg-gradient-to-r from-[#7395C0] via-[#F8DDA6] to-[#F9F6EE] rounded-full shadow-[0_0_8px_#F8DDA6]"
+                />
+              </div>
+              <span className="text-[9px] uppercase tracking-[0.22em] text-[#AFC9E5]/75 font-medium animate-pulse block">
+                Menuju Halaman Undangan...
+              </span>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 .agents/
 .aistudio/
+.backup_images/
 node_modules/
 build/
 dist/

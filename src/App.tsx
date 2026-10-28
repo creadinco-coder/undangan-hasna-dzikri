@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { motion, type Variants } from 'framer-motion';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { INVITATION_DATA } from './data/invitationData.ts';
 import { parseGuestName } from './utils/invitationUtils.ts';
 import { InvitationCover } from './components/InvitationCover.tsx';
@@ -20,6 +20,7 @@ import { FloatingNavigation } from './components/FloatingNavigation.tsx';
 import { AudioController } from './components/AudioController.tsx';
 import { SectionDivider } from './components/SectionDivider.tsx';
 import { ScrollToTopButton } from './components/ScrollToTopButton.tsx';
+import { AmbientGoldenSparkles } from './components/AmbientGoldenSparkles.tsx';
 
 import { InteractivePathJourney } from './components/InteractivePathJourney.tsx';
 
@@ -91,6 +92,7 @@ export default function App() {
   const [activeSection, setActiveSection] = useState<string>('couple');
   const [scrollProgress, setScrollProgress] = useState<number>(0);
   const [showScrollTop, setShowScrollTop] = useState<boolean>(false);
+  const [hasJustUnlocked, setHasJustUnlocked] = useState<boolean>(false);
   const phoneContainerRef = useRef<HTMLDivElement | null>(null);
 
   const isUnlocked = flowState === 'unlocked';
@@ -189,6 +191,11 @@ export default function App() {
   // Transition from Interactive Path Journey -> Full Invitation Unlocked
   const handleUnlockFullInvitation = (targetSectionId?: string) => {
     setFlowState('unlocked');
+    setHasJustUnlocked(true);
+    setTimeout(() => {
+      setHasJustUnlocked(false);
+    }, 3200);
+
     // Smoothly scroll to the target section or welcoming reflection section
     setTimeout(() => {
       const targetEl = targetSectionId
@@ -197,7 +204,7 @@ export default function App() {
       if (targetEl) {
         targetEl.scrollIntoView({ behavior: 'smooth' });
       }
-    }, 150);
+    }, 200);
   };
 
   const handleNavigate = (sectionId: string) => {
@@ -276,23 +283,51 @@ export default function App() {
           isOpen={flowState !== 'cover'}
         />
 
-        {/* 2. Gamified Interactive Path-Tracing Slider Journey */}
-        {flowState === 'interactive' && (
-          <InteractivePathJourney
-            data={INVITATION_DATA}
-            guestName={guestName}
-            onComplete={handleUnlockFullInvitation}
-            onSkip={handleUnlockFullInvitation}
-          />
-        )}
+        {/* 2. Gamified Interactive Path-Tracing Slider Journey with Smooth Dissolve */}
+        <AnimatePresence>
+          {flowState === 'interactive' && (
+            <motion.div
+              key="interactive-journey-container"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{
+                opacity: 0,
+                scale: 1.04,
+                filter: 'blur(8px)',
+                transition: { duration: 0.65, ease: [0.16, 1, 0.3, 1] },
+              }}
+              className="fixed inset-0 z-50 pointer-events-auto"
+            >
+              <InteractivePathJourney
+                data={INVITATION_DATA}
+                guestName={guestName}
+                onComplete={handleUnlockFullInvitation}
+                onSkip={handleUnlockFullInvitation}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Ambient Audio Controller: Starts music as soon as user interacts with cover */}
         <AudioController shouldStart={flowState !== 'cover'} />
 
+        {/* Floating Celebration Particles Shower upon Unlocking Full Invitation */}
+        {hasJustUnlocked && (
+          <div className="fixed inset-0 pointer-events-none z-40 overflow-hidden" aria-hidden="true">
+            <AmbientGoldenSparkles />
+          </div>
+        )}
+
         {/* 3. Main Unlocked Invitation Sections */}
-        <main
-          className={`w-full transition-opacity duration-700 ${
-            isUnlocked ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        <motion.main
+          initial={{ opacity: 0, y: 32 }}
+          animate={{
+            opacity: isUnlocked ? 1 : 0,
+            y: isUnlocked ? 0 : 32,
+          }}
+          transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
+          className={`w-full relative ${
+            isUnlocked ? 'pointer-events-auto' : 'pointer-events-none'
           }`}
         >
           {/* Relatable Welcoming Reflection before Couple Profiles */}
@@ -397,7 +432,7 @@ export default function App() {
           >
             <ClosingSection data={INVITATION_DATA} onScrollToTop={handleScrollToTop} />
           </motion.div>
-        </main>
+        </motion.main>
 
         {/* Floating Circular Navigation */}
         <FloatingNavigation
