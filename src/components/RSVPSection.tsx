@@ -42,20 +42,21 @@ interface RSVPSectionProps {
 const STORAGE_KEY = 'wedding_rsvp_submissions';
 
 export function RSVPSection({ guestName = '' }: RSVPSectionProps) {
-  // RSVP Submissions state persisted in localStorage
+  // RSVP Submissions state persisted in localStorage (sanitized: phone numbers are never stored in public storage)
   const [submissions, setSubmissions] = useState<RsvpSubmission[]>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          // Privacy sanitize: ensure phone is scrubbed from public view
+          return parsed.map((item: any) => ({ ...item, phone: '' }));
         }
       }
     } catch {
       // Fallback
     }
-    return getInitialSeedRsvps();
+    return getInitialSeedRsvps().map((item) => ({ ...item, phone: '' }));
   });
 
   // Active form inputs
@@ -87,9 +88,11 @@ export function RSVPSection({ guestName = '' }: RSVPSectionProps) {
     let isMounted = true;
     fetchRsvpFromSupabase().then((data) => {
       if (isMounted && data) {
-        setSubmissions(data);
+        // Scrub phone numbers for public view
+        const publicClean = data.map((item) => ({ ...item, phone: '' }));
+        setSubmissions(publicClean);
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(publicClean));
         } catch {}
       }
     });
@@ -105,7 +108,7 @@ export function RSVPSection({ guestName = '' }: RSVPSectionProps) {
             const incoming: RsvpSubmission = {
               id: newRow.id,
               name: newRow.name,
-              phone: newRow.phone || '',
+              phone: '', // Never expose phone numbers in public guest view
               status: newRow.status,
               pax: Number(newRow.pax) || 0,
               wishes: newRow.wishes || '',
@@ -141,11 +144,15 @@ export function RSVPSection({ guestName = '' }: RSVPSectionProps) {
     }
   }, [guestName]);
 
-  // Save submissions to localStorage
+  // Save submissions to localStorage (strictly scrubbing phone numbers)
   const persistSubmissions = (newSubmissions: RsvpSubmission[]) => {
-    setSubmissions(newSubmissions);
+    const publicClean = newSubmissions.map(({ phone, ...rest }) => ({
+      ...rest,
+      phone: '',
+    }));
+    setSubmissions(publicClean);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newSubmissions));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(publicClean));
     } catch {
       // ignore storage error
     }
@@ -178,6 +185,7 @@ export function RSVPSection({ guestName = '' }: RSVPSectionProps) {
     setIsSubmitting(true);
 
     setTimeout(() => {
+      // Full payload with phone for secure sync to couple's Supabase
       const newSubmission: RsvpSubmission = {
         id: `rsvp-${Date.now()}`,
         name: form.name.trim(),
@@ -188,17 +196,22 @@ export function RSVPSection({ guestName = '' }: RSVPSectionProps) {
         createdAt: new Date().toISOString(),
       };
 
-      const updated = [newSubmission, ...submissions];
-      persistSubmissions(updated);
-      setIsSubmitting(false);
-      setIsSubmitted(true);
-
-      // Kirim ke database Supabase jika sudah terkonfigurasi
+      // Push real phone securely to couple's Supabase database
       if (isSupabaseConfigured()) {
         insertRsvpToSupabase(newSubmission).catch((err) => {
           console.warn('[Supabase Sync Error]:', err);
         });
       }
+
+      // Public display with phone scrubbed
+      const publicCleanSubmission: RsvpSubmission = {
+        ...newSubmission,
+        phone: '',
+      };
+      const updated = [publicCleanSubmission, ...submissions];
+      persistSubmissions(updated);
+      setIsSubmitting(false);
+      setIsSubmitted(true);
     }, 450);
   };
 

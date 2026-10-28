@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import { INVITATION_DATA } from './data/invitationData.ts';
 import { parseGuestName } from './utils/invitationUtils.ts';
@@ -19,10 +19,14 @@ import { RSVPSection } from './components/RSVPSection.tsx';
 import { FloatingNavigation } from './components/FloatingNavigation.tsx';
 import { AudioController } from './components/AudioController.tsx';
 import { SectionDivider } from './components/SectionDivider.tsx';
-import { DashboardAuthGate } from './components/DashboardAuthGate.tsx';
 import { ScrollToTopButton } from './components/ScrollToTopButton.tsx';
 
 import { InteractivePathJourney } from './components/InteractivePathJourney.tsx';
+
+// Code-split DashboardAuthGate: Public invitation visitors never download admin bundle
+const DashboardAuthGate = lazy(() =>
+  import('./components/DashboardAuthGate.tsx').then((m) => ({ default: m.DashboardAuthGate }))
+);
 
 // Framer Motion entrance animation configuration for invitation sections
 const fadeInUpSectionVariants: Variants = {
@@ -90,6 +94,18 @@ export default function App() {
   const phoneContainerRef = useRef<HTMLDivElement | null>(null);
 
   const isUnlocked = flowState === 'unlocked';
+
+  // Privacy & Security: Immediately purge any sensitive couple dashboard data from storage on public view
+  useEffect(() => {
+    if (!isDashboard && typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('wedding_guest_directory');
+        localStorage.removeItem('wedding_wa_custom_template');
+        sessionStorage.removeItem('wedding_guest_directory');
+        sessionStorage.removeItem('wedding_wa_custom_template');
+      } catch {}
+    }
+  }, [isDashboard]);
 
   // Read URL query parameter 'to' dynamically with fallback 'Hasna' and monitor route
   useEffect(() => {
@@ -202,12 +218,29 @@ export default function App() {
   // Render dedicated Couple Dashboard view when URL is /dashboard or /admin
   if (isDashboard) {
     return (
-      <DashboardAuthGate
-        onBackToInvitation={() => {
-          window.history.pushState({}, '', '/');
-          window.dispatchEvent(new PopStateEvent('popstate'));
-        }}
-      />
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-[#141A2B] flex items-center justify-center text-[#AFC9E5]">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-[#7395C0] border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs font-medium tracking-wider uppercase">Memuat Dasbor Pasangan...</p>
+            </div>
+          </div>
+        }
+      >
+        <DashboardAuthGate
+          onBackToInvitation={() => {
+            try {
+              localStorage.removeItem('wedding_guest_directory');
+              localStorage.removeItem('wedding_wa_custom_template');
+              sessionStorage.removeItem('wedding_guest_directory');
+              sessionStorage.removeItem('wedding_wa_custom_template');
+            } catch {}
+            window.history.pushState({}, '', '/');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+          }}
+        />
+      </Suspense>
     );
   }
 

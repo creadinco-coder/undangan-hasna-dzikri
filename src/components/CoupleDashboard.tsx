@@ -78,10 +78,11 @@ interface CoupleDashboardProps {
 }
 
 export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboardProps) {
-  // 1. Guest Directory State
+  // 1. Guest Directory State (Uses isolated sessionStorage for privacy)
   const [guests, setGuests] = useState<InvitedGuest[]>(() => {
     try {
-      const stored = localStorage.getItem(GUEST_STORAGE_KEY);
+      localStorage.removeItem(GUEST_STORAGE_KEY);
+      const stored = sessionStorage.getItem(GUEST_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -94,7 +95,8 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   const [activePreset, setActivePreset] = useState<'formal' | 'casual' | 'family'>('formal');
   const [customTemplate, setCustomTemplate] = useState<string>(() => {
     try {
-      const stored = localStorage.getItem(TEMPLATE_STORAGE_KEY);
+      localStorage.removeItem(TEMPLATE_STORAGE_KEY);
+      const stored = sessionStorage.getItem(TEMPLATE_STORAGE_KEY);
       if (stored) return stored;
     } catch {}
     return DEFAULT_WA_TEMPLATES.formal;
@@ -125,7 +127,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   // 6. Live RSVP submissions from storage
   const [rsvps, setRsvps] = useState<RsvpSubmission[]>(() => {
     try {
-      const stored = localStorage.getItem(RSVP_STORAGE_KEY);
+      const stored = sessionStorage.getItem(RSVP_STORAGE_KEY) || localStorage.getItem(RSVP_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) return parsed;
@@ -140,12 +142,13 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
 
     let isMounted = true;
 
-    // Fetch cloud guests
+    // Fetch cloud guests (stored in sessionStorage for privacy)
     fetchGuestsFromSupabase().then((data) => {
       if (isMounted && data) {
         setGuests(data);
         try {
-          localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(data));
+          localStorage.removeItem(GUEST_STORAGE_KEY);
+          sessionStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(data));
         } catch {}
       }
     });
@@ -155,7 +158,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
       if (isMounted && data) {
         setRsvps(data);
         try {
-          localStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(data));
+          sessionStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(data));
         } catch {}
       }
     });
@@ -171,7 +174,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
             if (isMounted && data) {
               setRsvps(data);
               try {
-                localStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(data));
+                sessionStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(data));
               } catch {}
             }
           });
@@ -185,7 +188,8 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
             if (isMounted && data) {
               setGuests(data);
               try {
-                localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(data));
+                localStorage.removeItem(GUEST_STORAGE_KEY);
+                sessionStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(data));
               } catch {}
             }
           });
@@ -206,19 +210,21 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
 
-  // Persist guests to localStorage
+  // Persist guests to isolated sessionStorage (NEVER in public localStorage)
   const saveGuests = (newGuests: InvitedGuest[]) => {
     setGuests(newGuests);
     try {
-      localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(newGuests));
+      localStorage.removeItem(GUEST_STORAGE_KEY);
+      sessionStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(newGuests));
     } catch {}
   };
 
-  // Persist template to localStorage
+  // Persist template to isolated sessionStorage (NEVER in public localStorage)
   const saveTemplate = (newTemplate: string) => {
     setCustomTemplate(newTemplate);
     try {
-      localStorage.setItem(TEMPLATE_STORAGE_KEY, newTemplate);
+      localStorage.removeItem(TEMPLATE_STORAGE_KEY);
+      sessionStorage.setItem(TEMPLATE_STORAGE_KEY, newTemplate);
     } catch {}
     triggerNotice('Template pesan WhatsApp berhasil disimpan!');
   };
@@ -239,11 +245,12 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
       ]);
       if (cloudGuests) {
         setGuests(cloudGuests);
-        localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(cloudGuests));
+        localStorage.removeItem(GUEST_STORAGE_KEY);
+        sessionStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(cloudGuests));
       }
       if (cloudRsvps) {
         setRsvps(cloudRsvps);
-        localStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(cloudRsvps));
+        sessionStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(cloudRsvps));
       }
       triggerNotice('Data berhasil disinkronkan langsung dari Supabase Cloud!');
     } catch {
@@ -497,6 +504,26 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   const previewCompiledMessage = compileWaMessage(customTemplate, previewGuestName);
   const previewGeneratedLink = generateGuestInvitationLink(previewGuestName);
 
+  const handleExitToInvitation = () => {
+    try {
+      localStorage.removeItem(GUEST_STORAGE_KEY);
+      localStorage.removeItem(TEMPLATE_STORAGE_KEY);
+      sessionStorage.removeItem(GUEST_STORAGE_KEY);
+      sessionStorage.removeItem(TEMPLATE_STORAGE_KEY);
+    } catch {}
+    onBackToInvitation();
+  };
+
+  const handleLogoutAction = () => {
+    try {
+      localStorage.removeItem(GUEST_STORAGE_KEY);
+      localStorage.removeItem(TEMPLATE_STORAGE_KEY);
+      sessionStorage.removeItem(GUEST_STORAGE_KEY);
+      sessionStorage.removeItem(TEMPLATE_STORAGE_KEY);
+    } catch {}
+    if (onLogout) onLogout();
+  };
+
   return (
     <div className="min-h-screen bg-[#141A2B] text-[#DADDE0] font-sans antialiased pb-24 selection:bg-[#AFC9E5] selection:text-[#161D30]">
       {/* Executive Header / App Bar */}
@@ -505,7 +532,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
           {/* Left: Brand Monogram & Portal Info */}
           <div className="flex items-center gap-3.5">
             <button
-              onClick={onBackToInvitation}
+              onClick={handleExitToInvitation}
               title="Kembali ke Halaman Undangan Publik"
               className="flex items-center gap-1.5 text-xs font-semibold text-[#F9F6EE] hover:text-[#F8DDA6] bg-[#141A2B] hover:bg-[#202C48] border border-[#7395C0]/30 px-3 py-1.5 rounded-xl transition-all cursor-pointer shadow-sm"
             >
@@ -589,7 +616,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
 
             {onLogout && (
               <button
-                onClick={onLogout}
+                onClick={handleLogoutAction}
                 title="Kunci dasbor dan keluar dari sesi"
                 className="flex items-center gap-1.5 text-xs font-semibold text-rose-300 hover:text-white bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 px-3 py-1.5 rounded-xl transition-all cursor-pointer shadow-sm"
               >
