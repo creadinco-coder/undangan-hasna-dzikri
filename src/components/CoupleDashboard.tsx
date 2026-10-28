@@ -551,21 +551,29 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
               <button
                 type="button"
                 onClick={handleManualSync}
-                title="Tersambung ke Supabase. Klik untuk refresh/sinkronkan data langsung dari cloud."
-                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-600/40 text-[11px] text-emerald-300 font-medium shadow-xs cursor-pointer transition-all"
+                title="Tersambung ke Supabase Cloud. Klik untuk refresh data."
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-950/50 hover:bg-emerald-900/60 border border-emerald-600/50 text-[11px] text-emerald-300 font-medium shadow-xs cursor-pointer transition-all"
               >
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <RefreshCw className={`w-3 h-3 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
-                <span>Supabase Sync</span>
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <RefreshCw className={`w-3 h-3 text-emerald-400 shrink-0 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Supabase Sync</span>
+                <span className="inline sm:hidden">Sync</span>
               </button>
             ) : (
-              <div
-                title="Berjalan dalam mode LocalStorage. Tambahkan VITE_SUPABASE_URL di env untuk cloud sync."
-                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141A2B] border border-[#7395C0]/25 text-[11px] text-[#AFC9E5]/70"
+              <button
+                type="button"
+                onClick={() =>
+                  alert(
+                    'Supabase belum aktif di deployment Vercel ini.\n\nLangkah agar aktif di Production:\n1. Masuk ke Vercel -> Project Settings -> Environment Variables.\n2. Pastikan VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY sudah ada (tanpa tanda kutip).\n3. Buka tab Deployments di Vercel, klik titik tiga (...) pada deployment terakhir, lalu klik REDEPLOY agar env baru di-build ke dalam aplikasi.'
+                  )
+                }
+                title="Supabase belum aktif di deployment ini. Klik untuk melihat panduan."
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/60 border border-amber-600/40 text-[11px] text-amber-300 font-medium shadow-xs cursor-pointer transition-all"
               >
-                <Database className="w-3 h-3 text-[#7395C0]" />
-                <span>Local Storage</span>
-              </div>
+                <Database className="w-3 h-3 text-amber-400 shrink-0" />
+                <span className="hidden sm:inline">Local Mode (Klik Info)</span>
+                <span className="inline sm:hidden">Lokal</span>
+              </button>
             )}
 
             <a

@@ -7,21 +7,40 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { RsvpSubmission } from '../utils/rsvpUtils.ts';
 import { InvitedGuest } from '../utils/guestManagerUtils.ts';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const sanitizeEnv = (val: unknown): string => {
+  if (typeof val !== 'string') return '';
+  return val.replace(/^["']|["']$/g, '').trim();
+};
+
+const supabaseUrl = sanitizeEnv(import.meta.env.VITE_SUPABASE_URL);
+const supabaseAnonKey = sanitizeEnv(import.meta.env.VITE_SUPABASE_ANON_KEY);
 
 export const isSupabaseConfigured = (): boolean => {
   return Boolean(
     supabaseUrl &&
     supabaseAnonKey &&
-    supabaseUrl.startsWith('https://') &&
-    supabaseAnonKey.length > 20
+    (supabaseUrl.startsWith('https://') || supabaseUrl.includes('.supabase.co')) &&
+    supabaseAnonKey.length > 15
   );
 };
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured()
-  ? createClient(supabaseUrl!, supabaseAnonKey!)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+      },
+    })
   : null;
+
+export function getSupabaseDiagnosticInfo() {
+  return {
+    isConfigured: isSupabaseConfigured(),
+    urlDefined: Boolean(supabaseUrl),
+    urlPreview: supabaseUrl ? supabaseUrl.slice(0, 15) + '...' : 'none',
+    keyDefined: Boolean(supabaseAnonKey),
+    keyLength: supabaseAnonKey?.length || 0,
+  };
+}
 
 // ==========================================
 // 1. RSVP SUBMISSIONS SUPABASE SERVICE
