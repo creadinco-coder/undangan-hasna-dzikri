@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   Users,
   Send,
@@ -67,12 +67,15 @@ import {
   bulkInsertGuestsToSupabase,
   deleteGuestFromSupabase,
   deleteRsvpFromSupabase,
-  fetchWaTemplateFromSupabase,
-  saveWaTemplateToSupabase,
+  fetchWaTemplatesFromSupabase,
+  saveWaTemplatesToSupabase,
+  WaTemplatesBundle,
 } from '../lib/supabase.ts';
 
 const GUEST_STORAGE_KEY = 'wedding_guest_directory';
-const TEMPLATE_STORAGE_KEY = 'wedding_wa_custom_template';
+const TEMPLATES_STORAGE_KEY = 'wedding_wa_templates_bundle';
+const LEGACY_TEMPLATE_STORAGE_KEY = 'wedding_wa_custom_template';
+const ACTIVE_PRESET_STORAGE_KEY = 'wedding_wa_active_preset';
 const RSVP_STORAGE_KEY = 'wedding_rsvp_submissions';
 
 interface CoupleDashboardProps {
@@ -94,16 +97,49 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     return getInitialGuestDirectory();
   });
 
-  // 2. WhatsApp Template State (Persisted in Supabase with localStorage cache)
-  const [activePreset, setActivePreset] = useState<'formal' | 'casual' | 'family'>('formal');
-  const [isSavingTemplate, setIsSavingTemplate] = useState<boolean>(false);
-  const [customTemplate, setCustomTemplate] = useState<string>(() => {
+  // 2. WhatsApp Multi-Template State (Persisted in Supabase with localStorage cache)
+  const [activePreset, setActivePreset] = useState<'formal' | 'casual' | 'family'>(() => {
     try {
-      const stored = localStorage.getItem(TEMPLATE_STORAGE_KEY) || sessionStorage.getItem(TEMPLATE_STORAGE_KEY);
-      if (stored) return stored;
+      const stored = localStorage.getItem(ACTIVE_PRESET_STORAGE_KEY) || sessionStorage.getItem(ACTIVE_PRESET_STORAGE_KEY);
+      if (stored === 'formal' || stored === 'casual' || stored === 'family') return stored;
     } catch {}
-    return DEFAULT_WA_TEMPLATES.formal;
+    return 'formal';
   });
+  const [isSavingTemplate, setIsSavingTemplate] = useState<boolean>(false);
+  const [templates, setTemplates] = useState<{ formal: string; casual: string; family: string }>(() => {
+    try {
+      const stored = localStorage.getItem(TEMPLATES_STORAGE_KEY) || sessionStorage.getItem(TEMPLATES_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            formal: parsed.formal || DEFAULT_WA_TEMPLATES.formal,
+            casual: parsed.casual || DEFAULT_WA_TEMPLATES.casual,
+            family: parsed.family || DEFAULT_WA_TEMPLATES.family,
+          };
+        }
+      }
+      const legacy = localStorage.getItem(LEGACY_TEMPLATE_STORAGE_KEY) || sessionStorage.getItem(LEGACY_TEMPLATE_STORAGE_KEY);
+      if (legacy) {
+        return {
+          formal: legacy,
+          casual: DEFAULT_WA_TEMPLATES.casual,
+          family: DEFAULT_WA_TEMPLATES.family,
+        };
+      }
+    } catch {}
+    return {
+      formal: DEFAULT_WA_TEMPLATES.formal,
+      casual: DEFAULT_WA_TEMPLATES.casual,
+      family: DEFAULT_WA_TEMPLATES.family,
+    };
+  });
+
+  // Ref to template textarea for smart variable chip insertion
+  const templateTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Form template style override in Tab 1
+  const [formPresetOverride, setFormPresetOverride] = useState<'auto' | 'formal' | 'casual' | 'family'>('auto');
 
   // 3. New Guest Form State
   const [formName, setFormName] = useState<string>('');
@@ -166,16 +202,25 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
       }
     });
 
-    // Fetch cloud WA template
-    fetchWaTemplateFromSupabase().then((template) => {
-      if (isMounted && template) {
-        setCustomTemplate(template);
-        try {
-          localStorage.setItem(TEMPLATE_STORAGE_KEY, template);
-          sessionStorage.setItem(TEMPLATE_STORAGE_KEY, template);
-        } catch {}
+    const applyCloudTemplates = (bundle: WaTemplatesBundle | null) => {
+      if (!isMounted || !bundle) return;
+      setTemplates((prev) => ({
+        formal: bundle.formal || prev.formal || DEFAULT_WA_TEMPLATES.formal,
+        casual: bundle.casual || prev.casual || DEFAULT_WA_TEMPLATES.casual,
+        family: bundle.family || prev.family || DEFAULT_WA_TEMPLATES.family,
+      }));
+      if (bundle.activePreset) {
+        setActivePreset(bundle.activePreset);
       }
-    });
+      try {
+        localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(bundle));
+        sessionStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(bundle));
+        localStorage.setItem(ACTIVE_PRESET_STORAGE_KEY, bundle.activePreset);
+      } catch {}
+    };
+
+    // Fetch cloud WA templates bundle
+    fetchWaTemplatesFromSupabase().then(applyCloudTemplates);
 
     // Setup realtime subscription
     const channel = supabase
@@ -207,21 +252,14 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
               } catch {}
             }
           });
+          fetchWaTemplatesFromSupabase().then(applyCloudTemplates);
         }
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'wedding_settings' },
         () => {
-          fetchWaTemplateFromSupabase().then((template) => {
-            if (isMounted && template) {
-              setCustomTemplate(template);
-              try {
-                localStorage.setItem(TEMPLATE_STORAGE_KEY, template);
-                sessionStorage.setItem(TEMPLATE_STORAGE_KEY, template);
-              } catch {}
-            }
-          });
+          fetchWaTemplatesFromSupabase().then(applyCloudTemplates);
         }
       )
       .subscribe();
@@ -301,26 +339,95 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     } catch {}
   };
 
-  // Persist template to Supabase Cloud & localStorage cache
-  const saveTemplate = async (newTemplate: string) => {
-    setCustomTemplate(newTemplate);
+  // Switch active preset tab without resetting content
+  const handleSelectPreset = (presetKey: 'formal' | 'casual' | 'family') => {
+    setActivePreset(presetKey);
     try {
-      localStorage.setItem(TEMPLATE_STORAGE_KEY, newTemplate);
-      sessionStorage.setItem(TEMPLATE_STORAGE_KEY, newTemplate);
+      localStorage.setItem(ACTIVE_PRESET_STORAGE_KEY, presetKey);
+      sessionStorage.setItem(ACTIVE_PRESET_STORAGE_KEY, presetKey);
     } catch {}
+  };
+
+  // Update text of currently active preset
+  const handleTemplateTextChange = (text: string) => {
+    setTemplates((prev) => ({
+      ...prev,
+      [activePreset]: text,
+    }));
+  };
+
+  // Persist all templates to Supabase Cloud & localStorage cache
+  const saveAllTemplates = async () => {
+    const bundle: WaTemplatesBundle = {
+      formal: templates.formal,
+      casual: templates.casual,
+      family: templates.family,
+      activePreset,
+    };
+
+    try {
+      localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(bundle));
+      sessionStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(bundle));
+      localStorage.setItem(ACTIVE_PRESET_STORAGE_KEY, activePreset);
+      localStorage.setItem(LEGACY_TEMPLATE_STORAGE_KEY, templates[activePreset]);
+    } catch {}
+
+    const presetName =
+      activePreset === 'formal'
+        ? 'Formal & Khidmat'
+        : activePreset === 'casual'
+        ? 'Kasual & Sahabat'
+        : 'Keluarga Besar';
 
     if (isSupabaseConfigured()) {
       setIsSavingTemplate(true);
-      const ok = await saveWaTemplateToSupabase(newTemplate);
+      const ok = await saveWaTemplatesToSupabase(bundle);
       setIsSavingTemplate(false);
       if (ok) {
-        triggerNotice('Template pesan WhatsApp berhasil disimpan ke database!');
+        triggerNotice(`Template "${presetName}" & pengaturan pesan tersimpan ke database!`);
       } else {
-        triggerNotice('Template disimpan di browser lokal (database tidak terjangkau).');
+        triggerNotice(`Template "${presetName}" tersimpan di browser lokal (database offline).`);
       }
     } else {
-      triggerNotice('Template pesan WhatsApp berhasil disimpan di perangkat!');
+      triggerNotice(`Template "${presetName}" berhasil disimpan di perangkat!`);
     }
+  };
+
+  // Reset ONLY the currently active preset back to factory default
+  const handleResetCurrentPreset = () => {
+    const presetName =
+      activePreset === 'formal'
+        ? 'Formal & Khidmat'
+        : activePreset === 'casual'
+        ? 'Kasual & Sahabat'
+        : 'Keluarga Besar';
+
+    if (window.confirm(`Kembalikan format pesan "${presetName}" ke teks bawaan aslinya?`)) {
+      setTemplates((prev) => ({
+        ...prev,
+        [activePreset]: DEFAULT_WA_TEMPLATES[activePreset],
+      }));
+      triggerNotice(`Format pesan "${presetName}" telah dikembalikan ke bawaan.`);
+    }
+  };
+
+  // Smart variable chip insertion at cursor position
+  const insertVariable = (variable: string) => {
+    const textarea = templateTextareaRef.current;
+    const currentText = templates[activePreset] || '';
+    if (!textarea) {
+      handleTemplateTextChange(`${currentText} ${variable}`);
+      return;
+    }
+    const start = textarea.selectionStart ?? currentText.length;
+    const end = textarea.selectionEnd ?? currentText.length;
+    const newText = currentText.substring(0, start) + variable + currentText.substring(end);
+    handleTemplateTextChange(newText);
+    setTimeout(() => {
+      textarea.focus();
+      const pos = start + variable.length;
+      textarea.setSelectionRange(pos, pos);
+    }, 15);
   };
 
   const triggerNotice = (msg: string) => {
@@ -333,10 +440,10 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     if (!isSupabaseConfigured()) return;
     setIsSyncing(true);
     try {
-      const [cloudGuests, cloudRsvps, cloudTemplate] = await Promise.all([
+      const [cloudGuests, cloudRsvps, cloudBundle] = await Promise.all([
         fetchGuestsFromSupabase(),
         fetchRsvpFromSupabase(),
-        fetchWaTemplateFromSupabase(),
+        fetchWaTemplatesFromSupabase(),
       ]);
       if (cloudGuests) {
         setGuests(cloudGuests);
@@ -347,11 +454,19 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
         setRsvps(cloudRsvps);
         sessionStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(cloudRsvps));
       }
-      if (cloudTemplate) {
-        setCustomTemplate(cloudTemplate);
+      if (cloudBundle) {
+        setTemplates((prev) => ({
+          formal: cloudBundle.formal || prev.formal || DEFAULT_WA_TEMPLATES.formal,
+          casual: cloudBundle.casual || prev.casual || DEFAULT_WA_TEMPLATES.casual,
+          family: cloudBundle.family || prev.family || DEFAULT_WA_TEMPLATES.family,
+        }));
+        if (cloudBundle.activePreset) {
+          setActivePreset(cloudBundle.activePreset);
+        }
         try {
-          localStorage.setItem(TEMPLATE_STORAGE_KEY, cloudTemplate);
-          sessionStorage.setItem(TEMPLATE_STORAGE_KEY, cloudTemplate);
+          localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(cloudBundle));
+          sessionStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(cloudBundle));
+          localStorage.setItem(ACTIVE_PRESET_STORAGE_KEY, cloudBundle.activePreset);
         } catch {}
       }
       triggerNotice('Data & template berhasil disinkronkan langsung dari Supabase Cloud!');
@@ -426,15 +541,22 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     setImportErrors([]);
   };
 
-  const handleApplyPreset = (presetKey: 'formal' | 'casual' | 'family') => {
-    setActivePreset(presetKey);
-    saveTemplate(DEFAULT_WA_TEMPLATES[presetKey]);
-  };
+  // Helper to resolve template according to guest category
+  const getTemplateForCategory = useCallback(
+    (category: InvitedGuest['category']) => {
+      if (category === 'Keluarga') return templates.family;
+      if (category === 'Sahabat') return templates.casual;
+      return templates.formal;
+    },
+    [templates]
+  );
 
-  // Add a placeholder to template
-  const insertVariable = (variable: string) => {
-    setCustomTemplate((prev) => `${prev} ${variable}`);
-  };
+  const activeFormTemplate = useMemo(() => {
+    if (formPresetOverride !== 'auto') {
+      return templates[formPresetOverride];
+    }
+    return getTemplateForCategory(formCategory);
+  }, [formPresetOverride, formCategory, templates, getTemplateForCategory]);
 
   // Create Guest handler
   const handleAddGuest = (e: React.FormEvent, sendImmediate = false) => {
@@ -470,7 +592,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     setFormPax(2);
 
     if (sendImmediate) {
-      const message = compileWaMessage(customTemplate, newGuest.name);
+      const message = compileWaMessage(activeFormTemplate, newGuest.name);
       const waUrl = buildWhatsappLink(newGuest.phone, message);
       window.open(waUrl, '_blank');
       triggerNotice(`Tamu ${newGuest.name} tersimpan dan WhatsApp dibuka!`);
@@ -481,7 +603,8 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
 
   // Mark sent and open WhatsApp for an existing guest
   const handleSendWhatsapp = (guest: InvitedGuest) => {
-    const message = compileWaMessage(customTemplate, guest.name);
+    const templateToUse = getTemplateForCategory(guest.category);
+    const message = compileWaMessage(templateToUse, guest.name);
     const waUrl = buildWhatsappLink(guest.phone, message);
 
     // Update status to sent if not already
@@ -617,10 +740,13 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   }, []);
 
-  // Live preview of compiled message for the active input form
+  // Live preview of compiled message for the active input form (Tab 1)
   const previewGuestName = formName.trim() || 'Bpk. Ridwan Kamil & Ibu';
-  const previewCompiledMessage = compileWaMessage(customTemplate, previewGuestName);
+  const previewCompiledMessage = compileWaMessage(activeFormTemplate, previewGuestName);
   const previewGeneratedLink = generateGuestInvitationLink(previewGuestName);
+
+  // Live preview of compiled message in template editor (Tab 3)
+  const previewEditorCompiledMessage = compileWaMessage(templates[activePreset], previewGuestName);
 
   const handleExitToInvitation = () => {
     try {
@@ -1082,16 +1208,38 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
             {/* Live WhatsApp Bubble Preview Column */}
             <div className="lg:col-span-5 bg-[#1A233A] border border-[#7395C0]/25 rounded-3xl p-5 sm:p-7 shadow-xl flex flex-col justify-between text-left">
               <div>
-                <div className="flex items-center justify-between mb-3 border-b border-[#7395C0]/15 pb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 border-b border-[#7395C0]/15 pb-3">
                   <div className="flex items-center gap-2">
                     <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
                     <h3 className="font-serif text-base font-bold text-[#F9F6EE]">
                       Pratinjau Pesan WhatsApp
                     </h3>
                   </div>
-                  <span className="text-[10px] text-[#F8DDA6] bg-[#7395C0]/15 px-2.5 py-0.5 rounded-full border border-[#7395C0]/30 font-medium">
-                    Gaya: {activePreset === 'formal' ? 'Formal' : activePreset === 'casual' ? 'Santai' : 'Keluarga'}
-                  </span>
+                  <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                    <span className="text-[10px] text-[#AFC9E5]/70">Gaya:</span>
+                    <div className="inline-flex rounded-lg bg-[#141A2B] p-0.5 border border-[#7395C0]/30 text-[10px]">
+                      {(['auto', 'formal', 'casual', 'family'] as const).map((style) => (
+                        <button
+                          key={style}
+                          type="button"
+                          onClick={() => setFormPresetOverride(style)}
+                          className={`px-2 py-0.5 rounded-md transition-all cursor-pointer font-medium ${
+                            formPresetOverride === style
+                              ? 'bg-[#7395C0] text-white font-bold shadow-xs'
+                              : 'text-[#DADDE0]/70 hover:text-white'
+                          }`}
+                        >
+                          {style === 'auto'
+                            ? `Auto (${formCategory === 'Keluarga' ? 'Keluarga' : formCategory === 'Sahabat' ? 'Kasual' : 'Formal'})`
+                            : style === 'formal'
+                            ? 'Formal'
+                            : style === 'casual'
+                            ? 'Kasual'
+                            : 'Keluarga'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <p className="text-[11px] text-[#DADDE0]/75 mb-3">
@@ -1532,10 +1680,15 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
 
               {/* Preset Selector */}
               <div>
-                <label className="block text-xs font-semibold text-[#DADDE0] mb-2">
-                  Pilih Gaya Bahasa / Template:
-                </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-[#DADDE0]">
+                    Pilih Gaya Bahasa / Template:
+                  </label>
+                  <span className="text-[11px] text-[#AFC9E5] bg-[#7395C0]/15 px-2.5 py-0.5 rounded-full border border-[#7395C0]/30 font-medium">
+                    Sedang Diedit: <strong className="text-[#F8DDA6]">{activePreset === 'formal' ? 'Formal & Khidmat' : activePreset === 'casual' ? 'Kasual & Sahabat' : 'Keluarga Besar'}</strong>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {[
                     { id: 'formal', label: 'Formal & Khidmat', desc: 'Pejabat & Rekan Senior' },
                     { id: 'casual', label: 'Kasual & Sahabat', desc: 'Teman Sebaya & Komunitas' },
@@ -1544,15 +1697,23 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                     <button
                       key={preset.id}
                       type="button"
-                      onClick={() => handleApplyPreset(preset.id as any)}
-                      className={`p-2.5 rounded-xl text-left transition-all cursor-pointer border ${
+                      onClick={() => handleSelectPreset(preset.id as any)}
+                      className={`p-3 rounded-2xl text-left transition-all cursor-pointer border relative overflow-hidden ${
                         activePreset === preset.id
-                          ? 'bg-[#7395C0]/20 border-[#7395C0] text-[#F9F6EE]'
-                          : 'bg-[#141A2B] border-[#7395C0]/20 text-[#DADDE0]/80 hover:border-[#7395C0]/40'
+                          ? 'bg-[#7395C0]/25 border-[#7395C0] text-[#F9F6EE] shadow-lg ring-1 ring-[#7395C0]/60'
+                          : 'bg-[#141A2B] border-[#7395C0]/20 text-[#DADDE0]/70 hover:border-[#7395C0]/40 hover:text-white'
                       }`}
                     >
-                      <div className="text-xs font-bold">{preset.label}</div>
-                      <div className="text-[10px] text-[#AFC9E5]/70 mt-0.5">{preset.desc}</div>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <div className="text-xs font-bold">{preset.label}</div>
+                        {activePreset === preset.id && (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded-md border border-emerald-500/40">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            Aktif
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-[#AFC9E5]/70">{preset.desc}</div>
                     </button>
                   ))}
                 </div>
@@ -1589,9 +1750,10 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
               {/* Textarea Template */}
               <div>
                 <textarea
+                  ref={templateTextareaRef}
                   rows={13}
-                  value={customTemplate}
-                  onChange={(e) => setCustomTemplate(e.target.value)}
+                  value={templates[activePreset]}
+                  onChange={(e) => handleTemplateTextChange(e.target.value)}
                   className="w-full p-4 rounded-2xl bg-[#141A2B] border border-[#7395C0]/30 text-[#F9F6EE] font-mono text-xs leading-relaxed focus:outline-none focus:border-[#7395C0] focus:ring-1 focus:ring-[#7395C0] resize-y"
                   placeholder="Ketik draf pesan WhatsApp Anda di sini..."
                 />
@@ -1602,7 +1764,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                 <button
                   type="button"
                   disabled={isSavingTemplate}
-                  onClick={() => saveTemplate(customTemplate)}
+                  onClick={saveAllTemplates}
                   className="py-2.5 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center gap-2"
                 >
                   {isSavingTemplate ? (
@@ -1613,7 +1775,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
-                      <span>Simpan Perubahan Template</span>
+                      <span>Simpan Perubahan Template ({activePreset === 'formal' ? 'Formal' : activePreset === 'casual' ? 'Kasual' : 'Keluarga'})</span>
                     </>
                   )}
                 </button>
@@ -1621,10 +1783,10 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                 <button
                   type="button"
                   disabled={isSavingTemplate}
-                  onClick={() => handleApplyPreset('formal')}
+                  onClick={handleResetCurrentPreset}
                   className="py-2.5 px-4 rounded-xl bg-[#141A2B] hover:bg-[#202C48] disabled:opacity-60 text-[#DADDE0] text-xs border border-[#7395C0]/30 transition-all cursor-pointer"
                 >
-                  Reset ke Formal Bawaan
+                  Reset ke {activePreset === 'formal' ? 'Formal' : activePreset === 'casual' ? 'Kasual' : 'Keluarga'} Bawaan
                 </button>
               </div>
             </div>
@@ -1633,18 +1795,23 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
             <div className="lg:col-span-5 bg-[#1A233A] border border-[#7395C0]/25 rounded-3xl p-5 sm:p-7 shadow-xl text-left flex flex-col justify-between">
               <div>
                 <div className="border-b border-[#7395C0]/15 pb-3 mb-3">
-                  <h3 className="font-serif text-base font-bold text-[#F9F6EE] flex items-center gap-2">
-                    <MessageSquare className="w-4 h-4 text-emerald-400" />
-                    <span>Hasil Live di WhatsApp</span>
-                  </h3>
-                  <p className="text-[11px] text-[#DADDE0]/70 mt-0.5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-serif text-base font-bold text-[#F9F6EE] flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4 text-emerald-400" />
+                      <span>Hasil Live di WhatsApp</span>
+                    </h3>
+                    <span className="text-[10px] text-[#F8DDA6] bg-[#7395C0]/15 px-2 py-0.5 rounded-full border border-[#7395C0]/30 font-medium">
+                      {activePreset === 'formal' ? 'Gaya: Formal' : activePreset === 'casual' ? 'Gaya: Kasual' : 'Gaya: Keluarga'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#DADDE0]/70 mt-1">
                     Contoh pesan terkompilasi untuk tamu: <strong>{previewGuestName}</strong>.
                   </p>
                 </div>
 
                 <div className="bg-[#0b141a] p-4 rounded-2xl border border-stone-800 font-sans shadow-inner">
                   <div className="bg-[#005c4b] text-[#e9edef] rounded-2xl rounded-tr-xs p-4 text-xs whitespace-pre-wrap leading-relaxed shadow-md select-text">
-                    {previewCompiledMessage}
+                    {previewEditorCompiledMessage}
                   </div>
                   <div className="text-right text-[10px] text-stone-400 mt-2 pr-1 font-mono">
                     ✓✓ Terkirim otomatis via wa.me
@@ -1654,7 +1821,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
 
               <div className="mt-5 pt-3.5 border-t border-[#7395C0]/15 text-center">
                 <p className="text-[11px] text-[#DADDE0]/70">
-                  Semua tombol "Kirim WA" di buku tamu akan langsung memakai template yang tersimpan ini.
+                  Semua tombol "Kirim WA" di buku tamu otomatis menyesuaikan gaya bahasa kategori tamu (Sahabat = Kasual, Keluarga = Keluarga, Rekan/VIP = Formal).
                 </p>
               </div>
             </div>
