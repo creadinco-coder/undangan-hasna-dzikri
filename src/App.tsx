@@ -97,14 +97,12 @@ export default function App() {
 
   const isUnlocked = flowState === 'unlocked';
 
-  // Privacy & Security: Immediately purge any sensitive couple dashboard data from storage on public view
+  // Privacy & Security: Immediately purge sensitive guest directory from storage on public view
   useEffect(() => {
     if (!isDashboard && typeof window !== 'undefined') {
       try {
         localStorage.removeItem('wedding_guest_directory');
-        localStorage.removeItem('wedding_wa_custom_template');
         sessionStorage.removeItem('wedding_guest_directory');
-        sessionStorage.removeItem('wedding_wa_custom_template');
       } catch {}
     }
   }, [isDashboard]);
@@ -239,9 +237,7 @@ export default function App() {
           onBackToInvitation={() => {
             try {
               localStorage.removeItem('wedding_guest_directory');
-              localStorage.removeItem('wedding_wa_custom_template');
               sessionStorage.removeItem('wedding_guest_directory');
-              sessionStorage.removeItem('wedding_wa_custom_template');
             } catch {}
             window.history.pushState({}, '', '/');
             window.dispatchEvent(new PopStateEvent('popstate'));

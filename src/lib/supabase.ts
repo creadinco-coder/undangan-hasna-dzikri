@@ -12,8 +12,19 @@ const sanitizeEnv = (val: unknown): string => {
   return val.replace(/^["']|["']$/g, '').trim();
 };
 
-const supabaseUrl = sanitizeEnv(import.meta.env.VITE_SUPABASE_URL);
-const supabaseAnonKey = sanitizeEnv(import.meta.env.VITE_SUPABASE_ANON_KEY);
+const getEnvVar = (name: string): string => {
+  let val: unknown = '';
+  if (typeof import.meta !== 'undefined' && import.meta?.env) {
+    val = (import.meta.env as Record<string, unknown>)[name];
+  }
+  if (!val && typeof process !== 'undefined' && process?.env) {
+    val = process.env[name];
+  }
+  return sanitizeEnv(val);
+};
+
+const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
 export const isSupabaseConfigured = (): boolean => {
   return Boolean(
@@ -102,6 +113,22 @@ export async function insertRsvpToSupabase(submission: RsvpSubmission): Promise<
   }
 }
 
+export async function deleteRsvpFromSupabase(rsvpId: string): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { error } = await supabase.from('rsvp_submissions').delete().eq('id', rsvpId);
+
+    if (error) {
+      console.warn('[Supabase] Gagal menghapus RSVP:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Supabase] Error delete RSVP:', err);
+    return false;
+  }
+}
+
 // ==========================================
 // 2. GUEST DIRECTORY SUPABASE SERVICE
 // ==========================================
@@ -121,17 +148,19 @@ export async function fetchGuestsFromSupabase(): Promise<InvitedGuest[] | null> 
 
     if (!data) return [];
 
-    return data.map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      phone: item.phone || '',
-      category: item.category || 'Sahabat',
-      paxReserved: Number(item.pax_reserved) || 2,
-      customNotes: item.custom_notes || '',
-      status: item.status || 'pending',
-      sentAt: item.sent_at || undefined,
-      createdAt: item.created_at || new Date().toISOString(),
-    }));
+    return data
+      .filter((item: any) => !item.id?.startsWith('__'))
+      .map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        phone: item.phone || '',
+        category: item.category || 'Sahabat',
+        paxReserved: Number(item.pax_reserved) || 2,
+        customNotes: item.custom_notes || '',
+        status: item.status || 'pending',
+        sentAt: item.sent_at || undefined,
+        createdAt: item.created_at || new Date().toISOString(),
+      }));
   } catch (err) {
     console.warn('[Supabase] Error fetch daftar tamu:', err);
     return null;
@@ -210,4 +239,84 @@ export async function deleteGuestFromSupabase(guestId: string): Promise<boolean>
     return false;
   }
 }
+
+// ==========================================
+// 3. WHATSAPP TEMPLATE & SETTINGS SUPABASE SERVICE
+// ==========================================
+
+export async function fetchWaTemplateFromSupabase(): Promise<string | null> {
+  if (!supabase) return null;
+  try {
+    // 1. Coba ambil dari tabel terdedikasi 'wedding_settings'
+    const { data: settingsData, error: settingsError } = await supabase
+      .from('wedding_settings')
+      .select('value')
+      .eq('key', 'wa_template')
+      .maybeSingle();
+
+    if (!settingsError && settingsData?.value) {
+      return settingsData.value;
+    }
+
+    // 2. Fallback: Cek baris konfigurasi di 'guest_directory'
+    const { data: configRow, error: configError } = await supabase
+      .from('guest_directory')
+      .select('custom_notes')
+      .eq('id', '__config_wa_template__')
+      .maybeSingle();
+
+    if (!configError && configRow?.custom_notes) {
+      return configRow.custom_notes;
+    }
+
+    return null;
+  } catch (err) {
+    console.warn('[Supabase] Error fetch WA template:', err);
+    return null;
+  }
+}
+
+export async function saveWaTemplateToSupabase(template: string): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    // 1. Coba simpan ke tabel 'wedding_settings' jika sudah dibuat
+    const { error: settingsError } = await supabase.from('wedding_settings').upsert(
+      {
+        key: 'wa_template',
+        value: template,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'key' }
+    );
+
+    if (!settingsError) {
+      return true;
+    }
+
+    // 2. Fallback instan: Simpan ke record konfigurasi di 'guest_directory'
+    const { error: guestError } = await supabase.from('guest_directory').upsert(
+      {
+        id: '__config_wa_template__',
+        name: '[CONFIG] Template WhatsApp',
+        category: 'Lainnya',
+        pax_reserved: 1,
+        custom_notes: template,
+        status: 'sent',
+        created_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+
+    if (guestError) {
+      console.warn('[Supabase] Gagal menyimpan template WA ke database:', guestError.message);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('[Supabase] Error save WA template:', err);
+    return false;
+  }
+}
+
 

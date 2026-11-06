@@ -34,6 +34,10 @@ create policy "Allow update to rsvp_submissions"
   on public.rsvp_submissions for update
   using (true);
 
+create policy "Allow public delete rsvp_submissions"
+  on public.rsvp_submissions for delete
+  using (true);
+
 -- 2. Tabel Buku Tamu & Direktori Undangan Pasangan
 create table if not exists public.guest_directory (
   id text primary key,
@@ -72,10 +76,38 @@ create policy "Allow public delete guest_directory"
   on public.guest_directory for delete
   using (true);
 
--- 3. Aktifkan Fitur Realtime (agar live sync di RSVP feed & Dasbor berjalan mulus)
+-- 3. Tabel Pengaturan & Konfigurasi Pasangan (Termasuk Template Pesan WhatsApp)
+create table if not exists public.wedding_settings (
+  key text primary key,
+  value text not null,
+  updated_at timestamptz default timezone('utc'::text, now()) not null
+);
+
+-- Aktifkan Row Level Security (RLS)
+alter table public.wedding_settings enable row level security;
+
+-- Policy Wedding Settings: Izinkan akses baca dan simpan konfigurasi dasbor
+create policy "Allow public select wedding_settings"
+  on public.wedding_settings for select
+  using (true);
+
+create policy "Allow public insert wedding_settings"
+  on public.wedding_settings for insert
+  with check (true);
+
+create policy "Allow public update wedding_settings"
+  on public.wedding_settings for update
+  using (true);
+
+create policy "Allow public delete wedding_settings"
+  on public.wedding_settings for delete
+  using (true);
+
+-- 4. Aktifkan Fitur Realtime (agar live sync di RSVP feed, Buku Tamu, & Pengaturan berjalan mulus)
 begin;
-  -- Tambahkan rsvp_submissions dan guest_directory ke realtime publication jika belum ada
+  -- Tambahkan rsvp_submissions, guest_directory, dan wedding_settings ke realtime publication jika belum ada
   alter publication supabase_realtime add table public.rsvp_submissions;
   alter publication supabase_realtime add table public.guest_directory;
+  alter publication supabase_realtime add table public.wedding_settings;
 commit;
 

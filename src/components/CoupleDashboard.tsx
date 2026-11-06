@@ -66,6 +66,9 @@ import {
   upsertGuestToSupabase,
   bulkInsertGuestsToSupabase,
   deleteGuestFromSupabase,
+  deleteRsvpFromSupabase,
+  fetchWaTemplateFromSupabase,
+  saveWaTemplateToSupabase,
 } from '../lib/supabase.ts';
 
 const GUEST_STORAGE_KEY = 'wedding_guest_directory';
@@ -91,12 +94,12 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     return getInitialGuestDirectory();
   });
 
-  // 2. WhatsApp Template State
+  // 2. WhatsApp Template State (Persisted in Supabase with localStorage cache)
   const [activePreset, setActivePreset] = useState<'formal' | 'casual' | 'family'>('formal');
+  const [isSavingTemplate, setIsSavingTemplate] = useState<boolean>(false);
   const [customTemplate, setCustomTemplate] = useState<string>(() => {
     try {
-      localStorage.removeItem(TEMPLATE_STORAGE_KEY);
-      const stored = sessionStorage.getItem(TEMPLATE_STORAGE_KEY);
+      const stored = localStorage.getItem(TEMPLATE_STORAGE_KEY) || sessionStorage.getItem(TEMPLATE_STORAGE_KEY);
       if (stored) return stored;
     } catch {}
     return DEFAULT_WA_TEMPLATES.formal;
@@ -106,7 +109,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   const [formName, setFormName] = useState<string>('');
   const [formPhone, setFormPhone] = useState<string>('');
   const [formCategory, setFormCategory] = useState<InvitedGuest['category']>('Sahabat');
-  const [formPax, setFormPax] = useState<number>(2);
+  const [formPax, setFormPax] = useState<number | string>(2);
   const [formNotes, setFormNotes] = useState<string>('');
 
   // 4. Filter & Search State
@@ -163,6 +166,17 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
       }
     });
 
+    // Fetch cloud WA template
+    fetchWaTemplateFromSupabase().then((template) => {
+      if (isMounted && template) {
+        setCustomTemplate(template);
+        try {
+          localStorage.setItem(TEMPLATE_STORAGE_KEY, template);
+          sessionStorage.setItem(TEMPLATE_STORAGE_KEY, template);
+        } catch {}
+      }
+    });
+
     // Setup realtime subscription
     const channel = supabase
       .channel('public:couple_dashboard')
@@ -195,6 +209,21 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
           });
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'wedding_settings' },
+        () => {
+          fetchWaTemplateFromSupabase().then((template) => {
+            if (isMounted && template) {
+              setCustomTemplate(template);
+              try {
+                localStorage.setItem(TEMPLATE_STORAGE_KEY, template);
+                sessionStorage.setItem(TEMPLATE_STORAGE_KEY, template);
+              } catch {}
+            }
+          });
+        }
+      )
       .subscribe();
 
     return () => {
@@ -210,6 +239,59 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
 
+  // 8. Edit Guest Modal State
+  const [editingGuest, setEditingGuest] = useState<InvitedGuest | null>(null);
+  const [editName, setEditName] = useState<string>('');
+  const [editPhone, setEditPhone] = useState<string>('');
+  const [editCategory, setEditCategory] = useState<InvitedGuest['category']>('Sahabat');
+  const [editPax, setEditPax] = useState<number | string>(2);
+  const [editNotes, setEditNotes] = useState<string>('');
+  const [editStatus, setEditStatus] = useState<'pending' | 'sent'>('pending');
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
+
+  const handleOpenEditGuest = (guest: InvitedGuest) => {
+    setEditingGuest(guest);
+    setEditName(guest.name);
+    setEditPhone(guest.phone || '');
+    setEditCategory(guest.category);
+    setEditPax(guest.paxReserved || 1);
+    setEditNotes(guest.customNotes || '');
+    setEditStatus(guest.status);
+  };
+
+  const handleCloseEditGuest = () => {
+    setEditingGuest(null);
+    setIsSavingEdit(false);
+  };
+
+  const handleSaveEditGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGuest || !editName.trim()) return;
+
+    const updatedGuest: InvitedGuest = {
+      ...editingGuest,
+      name: editName.trim(),
+      phone: editPhone.trim(),
+      category: editCategory,
+      paxReserved: Math.max(1, Number(editPax) || 1),
+      customNotes: editNotes.trim(),
+      status: editStatus,
+      sentAt: editStatus === 'sent' ? (editingGuest.sentAt || new Date().toISOString()) : undefined,
+    };
+
+    const updatedList = guests.map((g) => (g.id === updatedGuest.id ? updatedGuest : g));
+    saveGuests(updatedList);
+
+    if (isSupabaseConfigured()) {
+      setIsSavingEdit(true);
+      await upsertGuestToSupabase(updatedGuest);
+      setIsSavingEdit(false);
+    }
+
+    triggerNotice(`Data tamu "${updatedGuest.name}" berhasil diperbarui!`);
+    handleCloseEditGuest();
+  };
+
   // Persist guests to isolated sessionStorage (NEVER in public localStorage)
   const saveGuests = (newGuests: InvitedGuest[]) => {
     setGuests(newGuests);
@@ -219,14 +301,26 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     } catch {}
   };
 
-  // Persist template to isolated sessionStorage (NEVER in public localStorage)
-  const saveTemplate = (newTemplate: string) => {
+  // Persist template to Supabase Cloud & localStorage cache
+  const saveTemplate = async (newTemplate: string) => {
     setCustomTemplate(newTemplate);
     try {
-      localStorage.removeItem(TEMPLATE_STORAGE_KEY);
+      localStorage.setItem(TEMPLATE_STORAGE_KEY, newTemplate);
       sessionStorage.setItem(TEMPLATE_STORAGE_KEY, newTemplate);
     } catch {}
-    triggerNotice('Template pesan WhatsApp berhasil disimpan!');
+
+    if (isSupabaseConfigured()) {
+      setIsSavingTemplate(true);
+      const ok = await saveWaTemplateToSupabase(newTemplate);
+      setIsSavingTemplate(false);
+      if (ok) {
+        triggerNotice('Template pesan WhatsApp berhasil disimpan ke database!');
+      } else {
+        triggerNotice('Template disimpan di browser lokal (database tidak terjangkau).');
+      }
+    } else {
+      triggerNotice('Template pesan WhatsApp berhasil disimpan di perangkat!');
+    }
   };
 
   const triggerNotice = (msg: string) => {
@@ -239,9 +333,10 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     if (!isSupabaseConfigured()) return;
     setIsSyncing(true);
     try {
-      const [cloudGuests, cloudRsvps] = await Promise.all([
+      const [cloudGuests, cloudRsvps, cloudTemplate] = await Promise.all([
         fetchGuestsFromSupabase(),
         fetchRsvpFromSupabase(),
+        fetchWaTemplateFromSupabase(),
       ]);
       if (cloudGuests) {
         setGuests(cloudGuests);
@@ -252,7 +347,14 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
         setRsvps(cloudRsvps);
         sessionStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(cloudRsvps));
       }
-      triggerNotice('Data berhasil disinkronkan langsung dari Supabase Cloud!');
+      if (cloudTemplate) {
+        setCustomTemplate(cloudTemplate);
+        try {
+          localStorage.setItem(TEMPLATE_STORAGE_KEY, cloudTemplate);
+          sessionStorage.setItem(TEMPLATE_STORAGE_KEY, cloudTemplate);
+        } catch {}
+      }
+      triggerNotice('Data & template berhasil disinkronkan langsung dari Supabase Cloud!');
     } catch {
       triggerNotice('Gagal menyinkronkan data dari Supabase.');
     } finally {
@@ -344,7 +446,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
       name: formName.trim(),
       phone: formPhone.trim(),
       category: formCategory,
-      paxReserved: Number(formPax) || 1,
+      paxReserved: Math.max(1, Number(formPax) || 1),
       customNotes: formNotes.trim(),
       status: sendImmediate ? 'sent' : 'pending',
       sentAt: sendImmediate ? new Date().toISOString() : undefined,
@@ -438,6 +540,22 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
     }
   };
 
+  // Delete RSVP submission
+  const handleDeleteRsvp = (id: string, name: string) => {
+    if (window.confirm(`Hapus data konfirmasi RSVP dari "${name}"?`)) {
+      const updated = rsvps.filter((r) => r.id !== id);
+      setRsvps(updated);
+      try {
+        sessionStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(updated));
+        localStorage.setItem(RSVP_STORAGE_KEY, JSON.stringify(updated));
+      } catch {}
+      if (isSupabaseConfigured()) {
+        deleteRsvpFromSupabase(id).catch(console.warn);
+      }
+      triggerNotice(`Data konfirmasi RSVP dari "${name}" telah dihapus.`);
+    }
+  };
+
   // Filtered guests
   const filteredGuests = useMemo(() => {
     return guests.filter((guest) => {
@@ -507,9 +625,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   const handleExitToInvitation = () => {
     try {
       localStorage.removeItem(GUEST_STORAGE_KEY);
-      localStorage.removeItem(TEMPLATE_STORAGE_KEY);
       sessionStorage.removeItem(GUEST_STORAGE_KEY);
-      sessionStorage.removeItem(TEMPLATE_STORAGE_KEY);
     } catch {}
     onBackToInvitation();
   };
@@ -517,9 +633,7 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
   const handleLogoutAction = () => {
     try {
       localStorage.removeItem(GUEST_STORAGE_KEY);
-      localStorage.removeItem(TEMPLATE_STORAGE_KEY);
       sessionStorage.removeItem(GUEST_STORAGE_KEY);
-      sessionStorage.removeItem(TEMPLATE_STORAGE_KEY);
     } catch {}
     if (onLogout) onLogout();
   };
@@ -835,17 +949,28 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                   </div>
 
                   <div>
-                    <label htmlFor="input-guest-pax" className="block text-xs font-semibold text-[#DADDE0] mb-1.5">
-                      Alokasi Pax
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label htmlFor="input-guest-pax" className="block text-xs font-semibold text-[#DADDE0]">
+                        Alokasi Pax
+                      </label>
+                      <span className="text-[10px] text-[#AFC9E5]/70">Bebas</span>
+                    </div>
                     <input
                       id="input-guest-pax"
                       type="number"
                       min="1"
-                      max="10"
                       value={formPax}
-                      onChange={(e) => setFormPax(Number(e.target.value))}
-                      className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#141A2B] border border-[#7395C0]/30 text-[#F9F6EE] focus:outline-none focus:border-[#7395C0] transition-all font-semibold"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '') {
+                          setFormPax('');
+                        } else {
+                          const parsed = parseInt(val, 10);
+                          setFormPax(isNaN(parsed) ? '' : Math.max(1, parsed));
+                        }
+                      }}
+                      placeholder="Jml pax"
+                      className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#141A2B] border border-[#7395C0]/30 text-[#F9F6EE] placeholder:text-[#DADDE0]/40 focus:outline-none focus:border-[#7395C0] focus:ring-1 focus:ring-[#7395C0] transition-all font-semibold"
                     />
                   </div>
                 </div>
@@ -1253,6 +1378,16 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                                 <ExternalLink className="w-3.5 h-3.5" />
                               </a>
 
+                              {/* Edit Tamu */}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditGuest(guest)}
+                                title="Edit data tamu ini"
+                                className="p-1.5 rounded-lg bg-[#141A2B] hover:bg-[#202C48] text-[#DADDE0] hover:text-[#F8DDA6] border border-[#7395C0]/30 transition-colors cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+
                               {/* Hapus */}
                               <button
                                 onClick={() => handleDeleteGuest(guest.id, guest.name)}
@@ -1356,6 +1491,15 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                           </a>
 
                           <button
+                            type="button"
+                            onClick={() => handleOpenEditGuest(guest)}
+                            title="Edit data tamu"
+                            className="p-1.5 rounded-lg bg-[#1A233A] border border-[#7395C0]/30 text-[#DADDE0] hover:text-[#F8DDA6]"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
                             onClick={() => handleDeleteGuest(guest.id, guest.name)}
                             className="p-1.5 rounded-lg bg-[#1A233A] border border-[#7395C0]/30 text-rose-400"
                           >
@@ -1454,19 +1598,31 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-2.5 pt-1">
+              <div className="flex flex-wrap items-center gap-2.5 pt-1">
                 <button
                   type="button"
+                  disabled={isSavingTemplate}
                   onClick={() => saveTemplate(customTemplate)}
-                  className="py-2.5 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                  className="py-2.5 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center gap-2"
                 >
-                  Simpan Perubahan Template
+                  {isSavingTemplate ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Menyimpan ke Database...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Simpan Perubahan Template</span>
+                    </>
+                  )}
                 </button>
 
                 <button
                   type="button"
+                  disabled={isSavingTemplate}
                   onClick={() => handleApplyPreset('formal')}
-                  className="py-2.5 px-4 rounded-xl bg-[#141A2B] hover:bg-[#202C48] text-[#DADDE0] text-xs border border-[#7395C0]/30 transition-all cursor-pointer"
+                  className="py-2.5 px-4 rounded-xl bg-[#141A2B] hover:bg-[#202C48] disabled:opacity-60 text-[#DADDE0] text-xs border border-[#7395C0]/30 transition-all cursor-pointer"
                 >
                   Reset ke Formal Bawaan
                 </button>
@@ -1611,8 +1767,8 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
               </div>
             </div>
 
-            {/* Submissions Table */}
-            <div className="overflow-x-auto rounded-2xl border border-[#7395C0]/25 shadow-inner">
+            {/* Submissions Table (Desktop View) */}
+            <div className="hidden md:block overflow-x-auto rounded-2xl border border-[#7395C0]/25 shadow-inner">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-[#141A2B] text-[#AFC9E5] border-b border-[#7395C0]/25 font-semibold">
@@ -1621,12 +1777,13 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                     <th className="py-3 px-4">Status Kehadiran</th>
                     <th className="py-3 px-4 text-center">Pax</th>
                     <th className="py-3 px-4">Pesan Doa &amp; Harapan</th>
+                    <th className="py-3 px-4 text-right">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#7395C0]/15 bg-[#1A233A]">
                   {filteredRsvps.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-12 text-center text-[#DADDE0]/60">
+                      <td colSpan={6} className="py-12 text-center text-[#DADDE0]/60">
                         {rsvps.length === 0
                           ? 'Belum ada data konfirmasi kehadiran tamu (RSVP) yang masuk.'
                           : 'Tidak ada data yang sesuai dengan pencarian / filter Anda.'}
@@ -1667,11 +1824,87 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                             <span className="text-[#DADDE0]/40">-</span>
                           )}
                         </td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRsvp(rsvp.id, rsvp.name)}
+                            title={`Hapus konfirmasi RSVP dari ${rsvp.name}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-rose-400 hover:text-white hover:bg-rose-950/60 border border-transparent hover:border-rose-800/50 transition-all cursor-pointer text-xs"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span className="hidden lg:inline text-[11px]">Hapus</span>
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
+            </div>
+
+            {/* Submissions Mobile Cards View */}
+            <div className="block md:hidden space-y-3">
+              {filteredRsvps.length === 0 ? (
+                <div className="py-10 text-center text-[#DADDE0]/60 text-xs bg-[#141A2B]/50 rounded-2xl border border-[#7395C0]/20 p-4">
+                  {rsvps.length === 0
+                    ? 'Belum ada data konfirmasi kehadiran tamu (RSVP) yang masuk.'
+                    : 'Tidak ada data yang sesuai dengan pencarian / filter Anda.'}
+                </div>
+              ) : (
+                filteredRsvps.map((rsvp) => (
+                  <div
+                    key={`mobile-rsvp-${rsvp.id}`}
+                    className="p-4 rounded-2xl bg-[#141A2B] border border-[#7395C0]/25 space-y-2.5 shadow-sm text-left"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h4 className="font-semibold text-xs text-[#F9F6EE]">{rsvp.name}</h4>
+                        <div className="text-[11px] font-mono text-[#AFC9E5] mt-0.5">
+                          {rsvp.phone ? formatPhoneDisplay(rsvp.phone) : 'Tanpa no. WhatsApp'}
+                        </div>
+                      </div>
+
+                      {rsvp.status === 'hadir' ? (
+                        <span className="text-[10.5px] font-semibold text-emerald-400 bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-700/60 inline-flex items-center gap-1 shrink-0">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          <span>Hadir ({rsvp.pax} Pax)</span>
+                        </span>
+                      ) : rsvp.status === 'tidak_hadir' ? (
+                        <span className="text-[10.5px] font-semibold text-rose-400 bg-rose-950/60 px-2.5 py-0.5 rounded-full border border-rose-700/60 inline-flex items-center gap-1 shrink-0">
+                          <XCircle className="w-3 h-3 text-rose-400" />
+                          <span>Tidak Hadir</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10.5px] font-semibold text-amber-400 bg-amber-950/60 px-2.5 py-0.5 rounded-full border border-amber-700/60 inline-flex items-center gap-1 shrink-0">
+                          <HelpCircle className="w-3 h-3 text-amber-400" />
+                          <span>Tentatif</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {rsvp.wishes && (
+                      <div className="p-2.5 rounded-xl bg-[#0E1320] border border-[#7395C0]/15 text-[11px] text-[#DADDE0]/85 italic">
+                        “{rsvp.wishes}”
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-2 border-t border-[#7395C0]/15 text-xs">
+                      <span className="text-[10px] text-[#DADDE0]/50 font-mono">
+                        {rsvp.createdAt ? new Date(rsvp.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRsvp(rsvp.id, rsvp.name)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-rose-300 hover:text-white bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 text-[11px] font-medium transition-all cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Hapus</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         )}
@@ -1861,6 +2094,211 @@ export function CoupleDashboard({ onBackToInvitation, onLogout }: CoupleDashboar
                   <span>Konfirmasi &amp; Impor ({importParsedGuests.length} Tamu)</span>
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Guest Modal */}
+        {editingGuest && (
+          <div className="fixed inset-0 z-50 bg-[#0E1320]/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-[#1A233A] border border-[#7395C0]/35 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl relative text-left my-8 animate-fade-in">
+              {/* Modal Header */}
+              <div className="flex items-start justify-between pb-4 border-b border-[#7395C0]/20">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-[#7395C0]/20 text-[#F8DDA6] border border-[#7395C0]/30 flex items-center justify-center">
+                    <Edit3 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-serif text-lg font-bold text-[#F9F6EE]">
+                      Edit Data Tamu Undangan
+                    </h3>
+                    <p className="text-xs text-[#DADDE0]/70 mt-0.5">
+                      Perbarui informasi kontak, alokasi pax, atau kategori tamu.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCloseEditGuest}
+                  className="p-1.5 rounded-lg text-[#DADDE0]/60 hover:text-white hover:bg-[#141A2B] transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Form Body */}
+              <form onSubmit={handleSaveEditGuest} className="mt-5 space-y-4">
+                {/* Nama Lengkap */}
+                <div>
+                  <label className="block text-xs font-semibold text-[#DADDE0] mb-1.5">
+                    Nama Tamu / Pasangan / Keluarga <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Contoh: Bpk. H. Ahmad Fauzi & Ibu"
+                    className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#141A2B] border border-[#7395C0]/30 text-[#F9F6EE] placeholder:text-[#DADDE0]/40 focus:outline-none focus:border-[#7395C0] focus:ring-1 focus:ring-[#7395C0] transition-all font-semibold"
+                  />
+                </div>
+
+                {/* WhatsApp & Pax */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-[#DADDE0] mb-1.5">
+                      Nomor WhatsApp
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-3.5 h-3.5 absolute left-3 top-3 text-[#7395C0]" />
+                      <input
+                        type="tel"
+                        value={editPhone}
+                        onChange={(e) => setEditPhone(e.target.value)}
+                        placeholder="0812-xxxx-xxxx"
+                        className="w-full pl-9 pr-3.5 py-2.5 text-xs rounded-xl bg-[#141A2B] border border-[#7395C0]/30 text-[#F9F6EE] placeholder:text-[#DADDE0]/40 focus:outline-none focus:border-[#7395C0] transition-all font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-[#DADDE0]">
+                        Alokasi Pax
+                      </label>
+                      <span className="text-[10px] text-[#AFC9E5]/70">Bebas</span>
+                    </div>
+                    <input
+                      type="number"
+                      min="1"
+                      value={editPax}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '') {
+                          setEditPax('');
+                        } else {
+                          const parsed = parseInt(val, 10);
+                          setEditPax(isNaN(parsed) ? '' : Math.max(1, parsed));
+                        }
+                      }}
+                      placeholder="Jml pax"
+                      className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#141A2B] border border-[#7395C0]/30 text-[#F9F6EE] focus:outline-none focus:border-[#7395C0] transition-all font-semibold"
+                    />
+                  </div>
+                </div>
+
+                {/* Kategori Pills */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-[#DADDE0]">
+                      Kelompok / Kategori Tamu
+                    </label>
+                    <span className="text-[10px] text-[#AFC9E5]/70">Pilih salah satu</span>
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    {(['Sahabat', 'Keluarga', 'Rekan Kerja', 'VIP', 'Lainnya'] as const).map((cat) => {
+                      const isSelected = editCategory === cat;
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setEditCategory(cat)}
+                          className={`py-2 px-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer border text-center ${
+                            isSelected
+                              ? cat === 'VIP'
+                                ? 'bg-[#F8DDA6]/20 border-[#F8DDA6] text-[#F8DDA6] font-bold shadow-sm'
+                                : cat === 'Keluarga'
+                                ? 'bg-amber-950/60 border-amber-500 text-amber-200 font-bold shadow-sm'
+                                : cat === 'Sahabat'
+                                ? 'bg-emerald-950/60 border-emerald-500 text-emerald-200 font-bold shadow-sm'
+                                : 'bg-[#7395C0]/30 border-[#7395C0] text-[#F9F6EE] font-bold shadow-sm'
+                              : 'bg-[#141A2B] border-[#7395C0]/25 text-[#DADDE0]/70 hover:border-[#7395C0]/50 hover:text-white'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Status Pengiriman */}
+                <div>
+                  <label className="block text-xs font-semibold text-[#DADDE0] mb-1.5">
+                    Status Pengiriman Undangan
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditStatus('pending')}
+                      className={`p-2 rounded-xl text-xs font-medium border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        editStatus === 'pending'
+                          ? 'bg-amber-950/60 border-amber-500 text-amber-200 font-bold'
+                          : 'bg-[#141A2B] border-[#7395C0]/25 text-[#DADDE0]/70 hover:border-[#7395C0]/50'
+                      }`}
+                    >
+                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Belum Dikirim</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEditStatus('sent')}
+                      className={`p-2 rounded-xl text-xs font-medium border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        editStatus === 'sent'
+                          ? 'bg-emerald-950/60 border-emerald-500 text-emerald-200 font-bold'
+                          : 'bg-[#141A2B] border-[#7395C0]/25 text-[#DADDE0]/70 hover:border-[#7395C0]/50'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Sudah Terkirim</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Catatan Internal */}
+                <div>
+                  <label className="block text-xs font-semibold text-[#DADDE0] mb-1.5">
+                    Catatan Internal <span className="text-[#DADDE0]/60 font-normal text-[10px]">(Opsional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    placeholder="Contoh: Teman SMA / Meja VIP 1"
+                    className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-[#141A2B] border border-[#7395C0]/30 text-[#F9F6EE] placeholder:text-[#DADDE0]/40 focus:outline-none focus:border-[#7395C0] transition-all"
+                  />
+                </div>
+
+                {/* Modal Footer Buttons */}
+                <div className="pt-4 border-t border-[#7395C0]/20 flex items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleCloseEditGuest}
+                    className="px-4 py-2.5 rounded-xl bg-[#141A2B] hover:bg-[#202C48] text-[#DADDE0] text-xs font-medium border border-[#7395C0]/30 transition-all cursor-pointer"
+                  >
+                    Batal
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isSavingEdit || !editName.trim()}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                  >
+                    {isSavingEdit ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Menyimpan...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Simpan Perubahan</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
